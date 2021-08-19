@@ -12,13 +12,14 @@ from rough_bergomi import rough_bergomi
 class MarketGenerator:
     def __init__(self, ticker, start=datetime.date(2000, 1, 1),
                  end=datetime.date(2019, 1, 1), freq="M",
-                 sig_order=4, rough_bergomi=None):
+                 sig_order=4, rough_bergomi=None, mkt_data=None):
 
         self.ticker = ticker
         self.start = start
         self.end = end
         self.freq = freq
         self.order = sig_order
+        self.data = mkt_data
 
         if rough_bergomi:
              self._load_rough_bergomi(rough_bergomi)
@@ -26,7 +27,10 @@ class MarketGenerator:
             self._load_data()
 
         self._build_dataset()
-        self.generator = CVAE(n_latent=8, alpha=0.003)
+        latent = 8
+        if self.data.shape[1]==2 and self.order == 4 :
+            latent=90
+        self.generator = CVAE(n_latent=latent, alpha=0.003)
 
     def _load_rough_bergomi(self, params):
         grid_points_dict = {"M": 28, "W": 5, "Y": 252}
@@ -39,10 +43,11 @@ class MarketGenerator:
 
 
     def _load_data(self):
-        try:
-            self.data = pdr.get_data_yahoo(self.ticker, self.start, self.end)["Close"]
-        except:
-            raise RuntimeError(f"Could not download data for {self.ticker} from {self.start} to {self.end}.")
+        if self.data is None:
+            try:
+                self.data = pdr.get_data_yahoo(self.ticker, self.start, self.end)["Close"]
+            except:
+                raise RuntimeError(f"Could not download data for {self.ticker} from {self.start} to {self.end}.")
 
         self.windows = []
         for _, window in self.data.resample(self.freq):
@@ -63,6 +68,13 @@ class MarketGenerator:
             self.orig_logsig = np.array([p for p in self.orig_logsig if len(p) >= 4])
             steps = min(map(len, self.orig_logsig))
             self.orig_logsig = np.array([val[:steps] for val in self.orig_logsig])
+        
+        # filter nan row
+        x = []
+        for ol in self.orig_logsig:
+            if np.sum(np.isnan(ol)) == 0:
+                x.append(ol)
+        self.orig_logsig = np.array(x)
 
         self.scaler = MinMaxScaler(feature_range=(0.00001, 0.99999))
         logsig = self.scaler.fit_transform(self.orig_logsig)
